@@ -1,0 +1,37 @@
+image: docker:19.03.8
+
+services:
+  - docker:19.03.8-dind
+
+variables: {}
+  # Use TLS https://docs.gitlab.com/ee/ci/docker/using_docker_build.html#tls-enabled
+  #DOCKER_HOST: tcp://docker:2376
+  #DOCKER_TLS_CERTDIR: "/certs"
+
+before_script:
+  - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  - echo $CI_REGISTRY
+
+build:
+  stage: build
+  only:
+    - tags 
+  script:
+    - docker pull $CI_REGISTRY_IMAGE:latest || true
+    - docker build --cache-from $CI_REGISTRY_IMAGE:latest --tag $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_NAME --tag $CI_REGISTRY_IMAGE:latest .
+    - docker push $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_NAME
+    - docker push $CI_REGISTRY_IMAGE:latest
+
+deploy:
+  stage: deploy
+  only: 
+    - tags
+  image: 
+    name: bitnami/kubectl:latest
+    entrypoint: [""]
+  before_script:
+    - echo ${PROD_KUBECONFIG} | base64 -d > /tmp/production.config
+  script:
+    - sed -i "s/DOJIBARBOT_IMAGE_VERSION/$CI_COMMIT_REF_NAME/" manifest/deployment.yaml
+    - sed -i "s/DOJIBARBOT_IMAGE_VERSION/$CI_COMMIT_REF_NAME/" manifest/subscription-cronjob.yaml
+    - /opt/bitnami/kubectl/bin/kubectl --kubeconfig /tmp/production.config -n dojibarbot apply -f ./manifest
